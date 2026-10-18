@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Supplier Prices</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#667085;--bd:#e3e6ea;--ac:#1d4ed8;--old:#b42318;--oldbg:#fee4e2}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--tx:#eceff3;--mu:#98a2b3;--bd:#2d323b;--ac:#6d9bff;--old:#ff8a80;--oldbg:#4a1d1a}}
+*{box-sizing:border-box}body{margin:0;font:16px system-ui,sans-serif;background:var(--bg);color:var(--tx);padding:12px;max-width:720px;margin:auto}
+h1{font-size:20px;margin:6px 0 10px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+input,button{font:inherit;color:inherit}
+#q{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--card)}
+button{padding:9px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);cursor:pointer}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}button.d{color:var(--old)}
+details{background:var(--card);border:1px solid var(--bd);border-radius:12px;margin-bottom:10px;padding:0 12px}
+summary{padding:12px 0;font-weight:600;cursor:pointer}summary small{color:var(--mu);font-weight:400}
+.row{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--bd)}
+.row .n{flex:1;min-width:0}.row .pr{font-weight:600;white-space:nowrap}
+.tag{font-size:12px;background:var(--oldbg);color:var(--old);padding:2px 7px;border-radius:99px;margin-left:6px;white-space:nowrap}
+.none{color:var(--mu);font-weight:400}
+.row input[type=text],.row input[type=number]{padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);min-width:0}
+.row input.pi{width:90px}.row label{font-size:12px;color:var(--mu);white-space:nowrap}
+#st{color:var(--mu);font-size:14px}#msg{color:var(--mu);padding:20px;text-align:center}
+</style></head><body>
+<h1>Supplier Purchase Prices</h1>
+<div class="bar"><input id="q" type="search" placeholder="Search supplier or product…" autocomplete="off"></div>
+<div class="bar" id="tools"></div>
+<div id="list"></div>
+<input id="file" type="file" accept=".xlsx" hidden>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+let data={suppliers:[]},pw=sessionStorage.getItem('pw')||'',edit=false,q='',timer;
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9),norm=s=>String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+const status=t=>{$('#st')&&($('#st').textContent=t)};
+async function api(body){return fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json','x-password':pw},body:JSON.stringify(body)})}
+async function load(){
+  try{const r=await fetch('/api/data');data=await r.json();if(data.error)throw data.error}
+  catch(e){$('#list').innerHTML='<div id="msg">Could not load data: '+esc(e)+'</div>';return}
+  if(pw){const r=await api({check:true});edit=r.ok;if(!r.ok){pw='';sessionStorage.removeItem('pw')}}
+  tools();render();
+}
+function save(){status('Saving…');clearTimeout(timer);timer=setTimeout(async()=>{
+  try{const r=await api({suppliers:data.suppliers});if(r.status===401){edit=false;pw='';tools();render();return status('Wrong password')}
+  status(r.ok?'Saved ✓':'Not saved – try again')}catch(e){status('Not saved – check internet')}},400)}
+function tools(){
+  $('#tools').innerHTML=edit?'<button class="p" data-a="addsup">+ Add supplier</button><button data-a="imp">Import Excel</button><button data-a="exp">Export Excel</button><button data-a="lock">Done editing</button><span id="st"></span>'
+  :'<button data-a="unlock">Edit</button>';
+}
+function render(){
+  const f=norm(q),L=$('#list');let h='',shown=0;
+  for(const s of data.suppliers){
+    const sm=!f||norm(s.name).includes(f);
+    const items=s.items.filter(i=>edit||sm||norm(i.name).includes(f));
+    if(!sm&&!items.length)continue;
+    if(edit&&f&&!sm&&!s.items.some(i=>norm(i.name).includes(f)))continue;
+    shown++;
+    h+=`<details data-s="${s.id}" ${(f||edit&&s.open)?'open':''}><summary>${edit?'':esc(s.name)}${edit?`<input type="text" data-f="sname" data-s="${s.id}" value="${esc(s.name)}" style="width:70%;padding:6px;border:1px solid var(--bd);border-radius:8px;background:var(--bg)">`:''} <small>${s.items.length} products</small></summary>`;
+    for(const i of items){
+      if(edit)h+=`<div class="row"><input type="text" class="n" data-f="name" data-s="${s.id}" data-i="${i.id}" value="${esc(i.name)}"><input type="number" class="pi" inputmode="decimal" data-f="price" data-s="${s.id}" data-i="${i.id}" value="${i.price??''}" placeholder="price"><label><input type="checkbox" data-f="old" data-s="${s.id}" data-i="${i.id}" ${i.old?'checked':''}> old</label><button class="d" data-a="deli" data-s="${s.id}" data-i="${i.id}">✕</button></div>`;
+      else h+=`<div class="row"><span class="n">${esc(i.name)}${i.old&&i.price!=null?'<span class="tag">Old price</span>':''}</span><span class="pr">${i.price==null?'<span class="none">No price yet</span>':'₹'+Number(i.price).toLocaleString('en-IN')}</span></div>`;
+    }
+    if(edit)h+=`<div class="row"><button data-a="addi" data-s="${s.id}">+ Add product</button><button class="d" data-a="delsup" data-s="${s.id}">Delete supplier</button></div>`;
+    h+='</details>';
+  }
+  L.innerHTML=shown?h:'<div id="msg">No match found</div>';
+}
+$('#q').oninput=e=>{q=e.target.value;render()};
+$('#list').addEventListener('change',e=>{
+  const t=e.target,s=data.suppliers.find(x=>x.id===t.dataset.s);if(!s||!t.dataset.f)return;
+  if(t.dataset.f==='sname'){s.name=t.value.trim()||s.name}
+  else{const i=s.items.find(x=>x.id===t.dataset.i);if(!i)return;
+    if(t.dataset.f==='name')i.name=t.value.trim();
+    if(t.dataset.f==='old')i.old=t.checked;
+    if(t.dataset.f==='price'){i.price=t.value===''?null:Number(t.value);i.old=false;t.closest('.row').querySelector('[data-f=old]').checked=false}}
+  save();
+});
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('button[data-a]');if(!b)return;const a=b.dataset.a,s=data.suppliers.find(x=>x.id===b.dataset.s);
+  if(a==='unlock'){const p=prompt('Enter edit password');if(!p)return;pw=p;const r=await api({check:true});
+    if(r.ok){edit=true;sessionStorage.setItem('pw',pw);tools();render()}else{pw='';alert('Wrong password')}}
+  if(a==='lock'){edit=false;tools();render()}
+  if(a==='addsup'){const n=prompt('Supplier name?');if(!n||!n.trim())return;data.suppliers.push({id:uid(),name:n.trim(),items:[],open:true});save();render()}
+  if(a==='addi'){document.querySelectorAll('details').forEach(d=>{const x=data.suppliers.find(y=>y.id===d.dataset.s);if(x)x.open=d.open});s.items.push({id:uid(),name:'',price:null,old:false});s.open=true;save();render()}
+  if(a==='deli'&&confirm('Delete this product?')){s.items=s.items.filter(x=>x.id!==b.dataset.i);s.open=true;save();render()}
+  if(a==='delsup'&&confirm('Delete supplier "'+s.name+'" and all its products?')){data.suppliers=data.suppliers.filter(x=>x!==s);save();render()}
+  if(a==='imp')$('#file').click();
+  if(a==='exp')exportXlsx();
+});
+const isRed=c=>{const f=c.fill&&c.fill.fgColor&&c.fill.fgColor.argb;if(!f)return false;const r=parseInt(f.slice(2,4),16),g=parseInt(f.slice(4,6),16),bl=parseInt(f.slice(6,8),16);return r>150&&g<80&&bl<80};
+$('#file').onchange=async e=>{
+  const file=e.target.files[0];if(!file)return;e.target.value='';
+  try{const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());let ns=0,ni=0,nu=0;
+    wb.eachSheet(ws=>{const name=ws.name.trim();let s=data.suppliers.find(x=>norm(x.name)===norm(name));if(!s){s={id:uid(),name,items:[]};data.suppliers.push(s);ns++}
+      ws.eachRow((row,n)=>{if(n===1)return;const pn=row.getCell(2).value,c=row.getCell(3);if(pn==null||!String(pn).trim())return;
+        let v=c.value;if(v&&typeof v==='object')v=v.result;v=(v===''||v==null||isNaN(Number(v)))?null:Number(v);
+        let i=s.items.find(x=>norm(x.name)===norm(pn));
+        if(!i){s.items.push({id:uid(),name:String(pn).replace(/\s+/g,' ').trim(),price:v,old:v!=null&&isRed(c)});ni++}
+        else if(v!=null){if(i.price!==v||i.old!==isRed(c))nu++;i.price=v;i.old=isRed(c)}})});
+    save();render();alert(`Import done: ${ns} new suppliers, ${ni} new products, ${nu} prices updated.`)}
+  catch(err){alert('Could not read this Excel file.')}
+};
+async function exportXlsx(){
+  const wb=new ExcelJS.Workbook(),used=new Set();
+  for(const s of data.suppliers){let n=s.name.replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,31).trim()||'Supplier',k=n,c=2;while(used.has(k.toLowerCase()))k=n.slice(0,28)+' '+c++;used.add(k.toLowerCase());
+    const ws=wb.addWorksheet(k);ws.columns=[{width:7},{width:48},{width:12}];ws.addRow(['S.No.','Products','Price']).font={bold:true};
+    s.items.forEach((i,x)=>{const r=ws.addRow([x+1,i.name,i.price]);if(i.old&&i.price!=null)r.getCell(3).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFC00000'}}})}
+  const buf=await wb.xlsx.writeBuffer(),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([buf]));a.download='PURCHASE_PRICE_backup.xlsx';a.click();
+}
+load();
+</script></body></html>
